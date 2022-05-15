@@ -1,0 +1,48 @@
+//@version=4
+strategy("Alt Coin BB SMA Strategy", overlay=false)
+
+length = 30
+fastLength = input(length*2)
+slowlength = input(length*4)
+MACD = ema(close, fastLength) - ema(close, slowlength)
+aMACD = ema(MACD, length*2)
+delta = MACD - aMACD
+
+sma_line = sma(close, length)
+ema_line = ema(close, length)
+
+bbw = bbw(close, length, 2)
+[middle, upper, lower] = bb(close, length, 2)
+
+sma_volume = sma(volume, length)
+shift_sma_volume = nz(sma_volume[1],0)
+shift_delta = offset(delta,1)
+diff_delta = (delta - shift_delta) * 10
+
+//ema = ema(ohlc4, 5)
+//old_ema = nz(ema[1],0)
+old_middle = nz(middle[1],0)
+slope = middle - old_middle
+//slope := slope < 0 ? slope * -1 : slope
+
+hline(0)
+
+//plot(close-upper,"upper",color.blue,linewidth=3)
+//plot(middle-ohlc4,"middle",color.red, linewidth=3)
+
+//plot(delta, "delta", color.red, linewidth=3)
+
+plotbar(0, delta>0?delta:0,delta>0?0:delta,0, title='Title', color = delta>0 ? color.green : color.red)
+//if (crossover(delta, 0))
+	//strategy.entry("MacdLE", strategy.long, comment="MacdLE")
+	
+middle_close_diff = close - middle
+middle_close_diff_shift = offset(middle_close_diff, 1)
+plot(middle_close_diff, "sd", color.green, linewidth=3)
+if(crossover(middle_close_diff, 0) and diff_delta >= 0 and slope >= -10)
+	strategy.order("L", true, 3)
+	//strategy.entry("L", strategy.long, 1)
+//plot(delta_sma, "delta_sma", color.red)
+if(crossunder(close, upper) )
+	strategy.order("S", false, 1)
+	//strategy.entry("S", strategy.short, 1)
