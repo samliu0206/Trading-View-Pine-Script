@@ -1,0 +1,158 @@
+//@version=4
+strategy("Strategy", "Strategy", overlay=false)
+
+symbol_in = input("BTC", "Symbol", type=input.string, options=["BTC", "ETH"], group='price source')
+src = input(ohlc4, title="Source", type=input.source, group='price source')
+smoothing = input("SMA", "Type", type=input.string, options=["SMA", "EMA", "RMA", "WMA"], group='Moving Average')
+length = input(title='Length', defval=7, group='Moving Average')
+
+upper = input(1.8, "Upper", type=input.float, step=0.1, minval=0, group='Threshold')
+lower = input(0.5, "Lower", type=input.float, step=0.1, maxval=0, group='Threshold')
+mid = (upper + lower) / 2
+//hline(upper)
+//hline(lower)
+
+
+// get datas
+f() => [src, volume]
+
+f_price_spot() =>
+    [p1, v1] = security("BINANCE:" + symbol_in + "USDT", timeframe.period, f())
+    [p2, v2] = security("OKEX:" + symbol_in + "USDT", timeframe.period, f())
+    [p3, v3] = security("HUOBI:" + symbol_in + "USDT", timeframe.period, f())
+    [p4, v4] = security("COINBASE:" + symbol_in + "USD", timeframe.period, f())
+    [p5, v5] = security("FTX:" + symbol_in + "USD", timeframe.period, f())
+    price_spot = (p1*v1+p2*v2+p3*v3+p4*v4+p5*v5)/(v1+v2+v3+v4+v5)
+
+f_price_future() =>
+    [p1, v1] = security("BINANCE:" + symbol_in + "USDTPERP", timeframe.period, f())
+    [p2, v2] = security("OKEX:" + symbol_in + "USDPERP", timeframe.period, f())
+    [p3, v3] = security("HUOBI:" + symbol_in + "PERP", timeframe.period, f())
+    [p4, v4] = security("BITMEX:" + symbol_in=="BTC"?"XBT":"ETH" + "USD", timeframe.period, f())
+    [p5, v5] = security("FTX:" + symbol_in+"PERP", timeframe.period, f())
+    price_future = (p1*v1+p2*v2+p3*v3+p4*v4+p5*v5)/(v1+v2+v3+v4+v5)
+
+price_spot = f_price_spot()
+price_future = f_price_future()
+
+
+// BTC perp futures premium
+premium = log(price_future / price_spot) * 1000 * 2
+
+
+// ma_function
+ma_function(source, length) =>
+	if smoothing == "RMA"
+		rma(source, length)
+	else
+		if smoothing == "SMA"
+			sma(source, length)
+		else
+			if smoothing == "EMA"
+				ema(source, length)
+			else
+				wma(source, length)
+				
+
+// calc moving average
+ma = ma_function(premium, length)
+
+//--------------------------------------------------------------
+//--------------------------------Slope-------------------------
+//--------------------------------------------------------------
+
+ema = ema(src, 3)
+old_ema = nz(ema[1],0)
+slope = (ema - old_ema) / ema * 100 //Percentage of change
+slope := slope < 0 ? slope * -1 : slope
+//plot(slope, "slp", color.orange, linewidth=3)
+
+// plot lines
+//palette = ma>upper?color.red:ma<lower?color.green:color.gray
+//plot(ma, linewidth=3, color=palette)
+plot(ma, "premium", ma <= upper ? color.gray : na, linewidth=3, transp=0)
+plot(ma, "premium", ma > upper ? color.red : na, linewidth=3, transp=0)
+plot(ma, "premium", ma < lower ? color.green : na, linewidth=3, transp=0)
+
+//h0 = hline(mid, "mid"))
+//h1 = hline(upper, "upper")
+//h2 = hline(lower, "lower")
+
+//----------------BTC.D-------------------
+
+[pd,vd] = security("CRYPTOCAP:BTC.D", timeframe.period, f())
+//[pd,vd] = security("AMEX:UUP", timeframe.period, f())
+ema_pd = (ema(pd, 3) - 50) / 2
+
+plot(ema_pd,"btcd", color.orange, linewidth=3)
+
+
+//----------------LONG / SHORT-------------------
+[pl,vl] = security("BITFINEX:BTCUSDLONGS", timeframe.period, f())
+[ps,vs] = security("BITFINEX:BTCUSDSHORTS", timeframe.period, f())
+//[pd,vd] = security("AMEX:UUP", timeframe.period, f())
+ema_ls = (ema((pl)/(ps), 3))
+longshort = ema_ls / 10
+plot(longshort,"ls", color.blue, linewidth=3)
+
+//--------------------------------------------------------------
+//----------------Premium between exchanger---------------------
+//--------------------------------------------------------------
+
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © M0rty
+
+//@version=4
+
+spread1 = security("BITFINEX:BTCUSD", timeframe.period, ohlc4)-security("COINBASE:BTCUSD", timeframe.period, ohlc4) 
+spread2 = security("COINBASE:BTCUSD", timeframe.period, ohlc4)-security("BINANCE:BTCUSDT", timeframe.period, ohlc4) 
+spread3 = security("COINBASE:BTCUSD", timeframe.period, ohlc4)-security("BITMEX:XBTUSD", timeframe.period, ohlc4) 
+spread = spread1*3+ spread2*2 + spread3*1
+spread_p = spread / security("BITFINEX:BTCUSD", timeframe.period, ohlc4) / 6
+ma_p = sma(spread, 7)  / 100
+
+
+upper_p = 1
+lower_p = -1
+
+plot(ma_p, "premium", ma_p <= upper_p ? color.gray : na, linewidth=2, transp=0)
+plot(ma_p, "premium", ma_p > upper_p ? color.green : na, linewidth=2, transp=0)
+plot(ma_p, "premium", ma_p < lower_p ? color.red : na, linewidth=2, transp=0)
+
+hline(0)
+
+
+slope_bond = 0.3
+
+if price_spot > 15000
+    goLong = ma < lower and ma_p > upper_p and slope < slope_bond 
+    goLongHalf = (ma < lower or ma_p > upper_p) and not goLong and slope < slope_bond
+    goShort = ma > upper and ma_p < lower_p and slope < slope_bond
+    goShortHalf = (ma > upper or ma_p < lower_p) and not goShort and slope < slope_bond
+    if goLong
+        alert("UMI says: 💵 BTC BUY 💵", alert.freq_once_per_bar)
+    if goShort
+        alert("UMI says: 🚨 BTC SELL 🚨", alert.freq_once_per_bar)
+    if goLongHalf and not goShortHalf
+        alert("UMI says: BTC HALF BUY", alert.freq_once_per_bar)
+    if goShortHalf and not goLongHalf
+        alert("UMI says: BTC HALF SELL", alert.freq_once_per_bar)
+    if goLongHalf and goShortHalf
+        alert("UMI says: Double Signal, Floating!", alert.freq_once_per_bar)
+    
+    //alert("WARNING: Test", alert.freq_once_per_bar)
+    strategy.order("buy", true, 1, when = goLong)
+    strategy.order("sell", false, 1, when = goShort)
+else
+    upper := 1
+    lower := -1
+    goLong = ma < lower and slope < slope_bond
+    goShort = ma > upper and slope < slope_bond
+    if goLong
+        alert("UMI says: 💵 BTC BUY 💵", alert.freq_once_per_bar)
+    if goShort
+        alert("UMI says: 🚨 BTC SELL 🚨", alert.freq_once_per_bar)
+    //alert("WARNING: Test", alert.freq_once_per_bar)
+    strategy.order("buy", true, 1, when = goLong)
+    strategy.order("sell", false, 0.5, when = goShort)
+
