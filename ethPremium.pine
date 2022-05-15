@@ -1,0 +1,111 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © zxzxcool
+
+//@version=4
+strategy("Eth Strategy", overlay=false)
+
+symbol_in = input("ETH", "Symbol", type=input.string, options=["BTC", "ETH"], group='price source')
+src = input(hlc3, title="Source", type=input.source, group='price source')
+smoothing = input("SMA", "Type", type=input.string, options=["SMA", "EMA", "RMA", "WMA"], group='Moving Average')
+length = input(title='Length', defval=7, group='Moving Average')
+
+upper = input(2, "Upper", type=input.float, step=0.1, minval=0, group='Threshold')
+lower = input(0, "Lower", type=input.float, step=0.1, maxval=0, group='Threshold')
+mid = (upper + lower) / 2
+
+// get datas
+f() => [src, volume]
+
+f_price_spot() =>
+    [p1, v1] = security("BINANCE:" + symbol_in + "USDT", timeframe.period, f())
+    [p2, v2] = security("HUOBI:" + symbol_in + "USDT", timeframe.period, f())
+    [p3, v3] = security("OKEX:" + symbol_in + "USDT", timeframe.period, f())
+    [p4, v4] = security("COINBASE:" + symbol_in + "USD", timeframe.period, f())
+    [p5, v5] = security("FTX:" + symbol_in + "USD", timeframe.period, f())
+    price_spot = (p1*v1+p2*v2+p3*v3+p4*v4+p5*v5)/(v1+v2+v3+v4+v5)
+
+f_price_future() =>
+    [p1, v1] = security("BINANCE:" + symbol_in + "USDTPERP", timeframe.period, f())
+    [p2, v2] = security("BYBIT:" + symbol_in + "USD", timeframe.period, f())
+    [p3, v3] = security("HUOBI:" + symbol_in + "PERP", timeframe.period, f())
+    [p4, v4] = security("BITMEX:" + symbol_in=="BTC"?"XBT":"ETH" + "USD", timeframe.period, f())
+    [p5, v5] = security("FTX:" + symbol_in+"PERP", timeframe.period, f())
+    price_future = (p1*v1+p2*v2+p3*v3+p4*v4+p5*v5)/(v1+v2+v3+v4+v5)
+
+price_spot = f_price_spot()
+price_future = f_price_future()
+
+
+// BTC perp futures premium
+premium = log(price_future / price_spot) * 1000
+
+
+// ma_function
+ma_function(source, length) =>
+	if smoothing == "RMA"
+		rma(source, length)
+	else
+		if smoothing == "SMA"
+			sma(source, length)
+		else
+			if smoothing == "EMA"
+				ema(source, length)
+			else
+				wma(source, length)
+				
+
+// calc moving average
+ma = ma_function(premium, length)
+
+
+
+// plot lines
+//palette = ma>upper?color.red:ma<lower?color.green:color.gray
+//plot(ma, linewidth=3, color=palette)
+plot(ma, "premium", ma <= upper ? color.gray : na, linewidth=1, transp=50)
+plot(ma, "premium", ma > upper ? color.red : na, linewidth=3, transp=0)
+plot(ma, "premium", ma < lower ? color.green : na, linewidth=3, transp=0)
+
+
+h0 = hline(0, "0")
+
+
+
+////------Slope-------
+
+ema = ema(src, 14)
+old_ema = nz(ema[1],0)
+slope = ema - old_ema
+slope := slope < 0 ? slope * -1 : slope
+//plot(slope, "slp", color.orange, linewidth=3)
+
+
+
+
+
+spread1 = security("BITFINEX:ETHUSD", timeframe.period, ohlc4)-security("COINBASE:ETHUSD", timeframe.period, ohlc4) 
+spread2 = security("COINBASE:ETHUSD", timeframe.period, ohlc4)-security("BINANCE:ETHUSDT", timeframe.period, ohlc4) 
+spread3 = security("COINBASE:ETHUSD", timeframe.period, ohlc4)-security("BITMEX:ETHUSD", timeframe.period, ohlc4) 
+spread = spread1 + spread2 + spread3
+spread_p = spread / security("BITFINEX:ETHUSD", timeframe.period, ohlc4) 
+ma_p = sma(spread_p, 7) * 1000
+
+upper_p = 0.5
+lower_p = -2
+
+plot(ma_p, "premium", ma_p <= upper_p ? color.gray : na, linewidth=1, transp=50)
+plot(ma_p, "premium", ma_p > upper_p ? color.green : na, linewidth=3, transp=50)
+plot(ma_p, "premium", ma_p < lower_p ? color.red : na, linewidth=3, transp=50)
+
+
+slope_bond = 30
+goLong = ma < lower and ma_p > upper_p and slope < slope_bond
+goShort = ma > upper and ma_p < lower_p and slope < slope_bond
+if goLong
+    alert("UMI says: 💵 ETH BUY 💵", alert.freq_once_per_bar)
+if goShort
+    alert("UMI says: 🚨 ETH SELL 🚨", alert.freq_once_per_bar)
+//alert("WARNING: Test", alert.freq_once_per_bar)
+strategy.order("buy", true, 1, when = goLong)
+strategy.order("sell", false, 1, when = goShort)
+
